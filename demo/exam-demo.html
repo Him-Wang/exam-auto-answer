@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>模拟考试（exam.mjs 自测页）</title>
+<style>
+  body { font: 15px/1.6 "Microsoft YaHei", sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+  .head { background: #2b58c8; color: #fff; padding: 14px 24px; font-size: 18px; }
+  .wrap { display: flex; gap: 20px; padding: 20px; align-items: flex-start; }
+  .left { flex: 1; background: #fff; border-radius: 8px; padding: 22px 26px; min-height: 380px; }
+  .right { width: 300px; background: #fff; border-radius: 8px; padding: 18px; }
+  .question_num { font-size: 13px; color: #2b58c8; margin-bottom: 10px; }
+  .jtitle { font-size: 17px; margin: 6px 0 16px; }
+  label.option_label { display: block; padding: 9px 12px; border: 1px solid #e3e6ec; border-radius: 6px; margin-bottom: 8px; cursor: pointer; }
+  label.option_label:hover { border-color: #2b58c8; }
+  .panel a { display: inline-block; width: 34px; height: 30px; line-height: 30px; text-align: center; border: 1px solid #dfe3ea; margin: 3px; border-radius: 4px; cursor: pointer; font-size: 13px; text-decoration: none; color: #333; }
+  .panel a.done { background: #2b58c8; color: #fff; border-color: #2b58c8; }
+  .qButton { display: inline-block; background: #2b58c8; color: #fff; padding: 9px 22px; border-radius: 5px; cursor: pointer; margin-top: 14px; }
+  .qButton.ghost { background: #eef1f7; color: #2b58c8; }
+  #result { margin-top: 16px; font-weight: 700; color: #c0392b; }
+</style>
+</head>
+<body>
+<div class="head">自测用模拟考试 · exam.mjs 端到端验证</div>
+<div class="wrap">
+  <div class="left">
+    <div id="stage"></div>
+    <div style="margin-top:18px">
+      <span class="qButton ghost" id="prev">上一题</span>
+      <span class="qButton" id="next">下一题</span>
+      <span class="qButton" id="submit">我要交卷</span>
+    </div>
+    <div id="result"></div>
+  </div>
+  <div class="right">
+    <div style="text-align:center;color:#666;margin-bottom:10px">题号</div>
+    <div class="panel" id="panel"></div>
+  </div>
+</div>
+<script>
+// The DOM deliberately mirrors the 问卷网 exam page so exam.mjs is tested against
+// the same shape it meets in production: .question_num, .wjques + label.option_label,
+// a[pageid="page_N"] jump links, 交卷 by button text.
+const QS = [
+  { n: 1, type: '单选题', stem: '中华人民共和国成立于哪一年？', opts: ['1945', '1949', '1951', '1978'], ans: [1] },
+  { n: 2, type: '单选题', stem: '水的化学式是？', opts: ['CO2', 'H2O', 'NaCl', 'O2'], ans: [1] },
+  { n: 3, type: '多选题', stem: '下列哪些属于质数？（多选）', opts: ['2', '4', '7', '9'], ans: [0, 2] },
+  { n: 4, type: '单选题', stem: '17 × 3 = ?', opts: ['47', '51', '53', '57'], ans: [1] },
+  { n: 5, type: '多选题', stem: '下列哪些是编程语言？（多选）', opts: ['Python', 'HTML', 'Rust', 'JSON'], ans: [0, 2] },
+  { n: 6, type: '单选题', stem: '一年中白昼最长的是哪个节气？', opts: ['春分', '夏至', '秋分', '冬至'], ans: [1] },
+  { n: 7, type: '单选题', stem: 'log2(64) = ?', opts: ['4', '5', '6', '8'], ans: [2] },
+  { n: 8, type: '多选题', stem: '下列哪些是偶数？（多选）', opts: ['12', '7', '24', '31'], ans: [0, 2] },
+];
+const picked = {};
+let cur = 1;
+let submitted = false;
+
+const byN = (n) => QS.find((q) => q.n === n);
+const stage = document.getElementById('stage');
+const panel = document.getElementById('panel');
+
+panel.innerHTML = QS.map((q) => `<a pageid="page_${q.n}" onclick="jump_event(this)">${q.n}</a>`).join('');
+
+function jump_event(el) {
+  cur = Number(el.getAttribute('pageid').replace('page_', ''));
+  render();
+}
+window.jump_event = jump_event;
+
+function render() {
+  const q = byN(cur);
+  const multi = q.type.includes('多选');
+  const sel = picked[cur] || [];
+  stage.innerHTML = `
+    <div class="wjques">
+      <div class="question_num">${q.n} ${q.type}</div>
+      <div class="jtitle">${q.stem}</div>
+      ${q.opts.map((t, i) => {
+        // Multi-select labels deliberately carry no htmlFor, and every input shares one
+        // id — exactly the trap that makes index-based pairing mandatory.
+        const id = multi ? 'option_shared' : 'option_' + q.n + '_' + i;
+        return `<label class="option_label"${multi ? '' : ` for="${id}"`}>
+          <input type="${multi ? 'checkbox' : 'radio'}" ${multi ? '' : `name="q${q.n}"`} id="${id}" ${sel.includes(i) ? 'checked' : ''} data-i="${i}"> ${t}
+        </label>`;
+      }).join('')}
+    </div>`;
+  [...stage.querySelectorAll('input')].forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const i = Number(inp.dataset.i);
+      const set = new Set(picked[cur] || []);
+      if (multi) { inp.checked ? set.add(i) : set.delete(i); } else { set.clear(); set.add(i); }
+      picked[cur] = [...set].sort((a, b) => a - b);
+      mark();
+    });
+  });
+  mark();
+}
+
+function mark() {
+  [...panel.children].forEach((a, i) => {
+    a.classList.toggle('done', (picked[i + 1] || []).length > 0);
+  });
+}
+
+document.getElementById('prev').onclick = () => { if (cur > 1) { cur--; render(); } };
+document.getElementById('next').onclick = () => { if (cur < QS.length) { cur++; render(); } };
+document.getElementById('submit').onclick = () => {
+  if (!confirm(`共 ${QS.length} 题，已答 ${Object.keys(picked).length} 题。确认交卷？`)) return;
+  let score = 0;
+  QS.forEach((q) => {
+    const got = (picked[q.n] || []).slice().sort((a, b) => a - b).join(',');
+    if (got === q.ans.slice().sort((a, b) => a - b).join(',')) score++;
+  });
+  submitted = true;
+  document.getElementById('result').textContent = `交卷成功：得分 ${score} / ${QS.length}　（已答 ${Object.keys(picked).length} 题）`;
+  window.__SCORE__ = { score, total: QS.length };
+};
+
+render();
+</script>
+</body>
+</html>

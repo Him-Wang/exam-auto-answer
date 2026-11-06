@@ -1,0 +1,18 @@
+# 本地凭据，绝不入库
+exam-config.json
+*.key
+
+# 抓题/答题的中间产物（含真实考题，别公开）
+q.json
+q.txt
+a.json
+answers.txt
+questions*.json
+q2-compact.txt
+answer-map*.json
+
+# 运行时产物
+*.png
+node_modules/
+.DS_Store
+Thumbs.db
