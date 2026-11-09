@@ -6,6 +6,25 @@
 
 **在 Claude Code / DSH / Cursor 这类对话环境里用，不需要任何 API key** —— 答题的就是对话里的模型自己。只有想脱离对话无人值守跑，才需要导入一个 OpenAI 兼容的 key。
 
+## 这是什么：一个 skill，不是一个软件
+
+**这是一个 skill（技能包），不是可独立运行的软件。** 没有安装包、没有窗口、没有常驻进程，也没有 `npm install`。
+
+| | skill（本仓库） | 软件 |
+|---|---|---|
+| 本质 | 一份写给 AI 读的操作手册 + 配套脚本 | 一个能独立运行的程序 |
+| 谁在"思考" | 加载了这份手册的模型 | 程序内部写死的逻辑 |
+| 入口 | 由 AI 助手在对话里自动触发（说"自动答题"或贴考试网址） | 双击图标 / 敲命令 / 开网页 |
+| 本仓库的证据 | `SKILL.md` 就是技能本体 | 无 |
+
+具体怎么分工：
+
+- **`SKILL.md` 是本体。** 它规定"先 `probe`、再 `harvest`、自己填答题卡、`apply`、`verify`、最后才 `submit`"这个顺序，也记录了三个必须绕开的坑。**只有当模型读了它**，下面这堆脚本才会被串成一串有意义的动作。
+- **`scripts/*.mjs` 是手，不是脑。** 它们是很普通的 Node CLI，你手动敲 `node scripts/exam.mjs harvest --port 9223` 也照样抓题；但没人告诉它该选哪个选项时，它自己什么也不会做。
+- **`answer.mjs` 让它变成"半个软件"。** 配上 key 之后可以无人值守自己跑完，但仍然是个没有界面的命令行程序——只是把"脑"外包给了模型 API。
+
+想把它变成真正的软件（双击启动、有界面、看得见进度），需要另外套一层 Electron / Tauri 外壳，那是另一个工程，不在本仓库范围内。
+
 ## 它解决的三个具体问题
 
 在线考试页面（问卷网 `wenjuan.com` 系）有三个坑，靠肉眼和手点是躲不过去的：
@@ -13,6 +32,22 @@
 1. **多选题的 `label` 没有 `htmlFor`，且所有 checkbox 的 `id` 相同。** 靠 `getElementById` 永远读到同一个 input，表现为"点了但一个都没选上"。只能按 `querySelectorAll('input[type=radio],input[type=checkbox]')` 的数组下标操作。
 2. **点完题号立刻读 DOM，拿到的还是上一题。** 必须轮询等到题号真的变了，否则整批题目和答案错位。
 3. **对已登录的考试页改视口尺寸会触发页面刷新，一次性考试令牌作废**，直接被打回登录页。视口必须在登录之前设好。
+
+## 安装（作为 skill）
+
+整个目录丢进你所用 AI 助手的技能目录即可，`SKILL.md` 必须在目录顶层：
+
+```bash
+# DeepSeek Harness
+git clone https://github.com/Him-Wang/exam-auto-answer.git ~/.dsh/skills/exam-auto-answer
+
+# Claude Code
+git clone https://github.com/Him-Wang/exam-auto-answer.git ~/.claude/skills/exam-auto-answer
+```
+
+然后直接对助手说"帮我做这个考试：`https://...`"。它会自己读 `SKILL.md`、开浏览器、抓题、答题。
+
+也可以纯手动当命令行工具用，见下面的快速开始——但那样"答题"这一步得你自己填。
 
 ## 快速开始
 
