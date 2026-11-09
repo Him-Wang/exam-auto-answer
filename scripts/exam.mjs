@@ -128,6 +128,10 @@ async function connect() {
   session.onEvent = (m) => {
     if (m.method === 'Page.javascriptDialogOpening') {
       session.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {});
+    } else if (m.method === 'Runtime.consoleAPICalled' && m.params) {
+      // In-page loops stream '@@p <n>' so a 85-question pass still shows movement.
+      const a = m.params.args || [];
+      if (a[0] && a[0].value === '@@p') process.stderr.write(`\r${a[1] ? a[1].value : ''}  `);
     }
   };
   return { session, page, ws };
@@ -146,13 +150,28 @@ const H = `
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const numOf = () => { const el = document.querySelector(P.questionNum); if (!el) return null; const m = (el.innerText || '').match(/^[^0-9]*([0-9]+)/); return m ? m[1] : null; };
 const inputs = () => Array.from(document.querySelectorAll(P.inputs));
-const jump = async (n) => {
-  const a = document.querySelector('[' + P.numAttr + '="' + P.numPrefix + n + '"]') || document.querySelectorAll(P.numberLinks)[n - 1];
+const linkOf = n => document.querySelector('[' + P.numAttr + '="' + P.numPrefix + n + '"]') || document.querySelectorAll(P.numberLinks)[n - 1];
+// Resolve the moment the badge flips to n. A fixed sleep either wastes time on a fast
+// page or reads the PREVIOUS question's DOM on a slow one.
+const waitNum = (n, ms) => new Promise(res => {
+  const want = String(n), t0 = Date.now();
+  let iv = 0;
+  const stop = ok => { clearInterval(iv); mo.disconnect(); res(ok); };
+  const check = () => { if (numOf() === want) { stop(true); return true; } return false; };
+  const mo = new MutationObserver(check);
+  mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+  iv = setInterval(() => { if (check()) return; if (Date.now() - t0 > (ms || 6000)) stop(false); }, 15);
+});
+const jumpFast = async (n, ms) => {
+  if (numOf() === String(n)) return true;
+  const a = linkOf(n);
   if (!a) return false;
   a.click();
-  for (let i = 0; i < 40; i++) { await sleep(60); if (numOf() === String(n)) return true; }
-  return false;
+  return waitNum(n, ms || 6000);
 };
+const checkedIdx = () => inputs().map((x, i) => x.checked ? i : -1).filter(i => i >= 0);
+const same = (a, b) => a.slice().sort((x, y) => x - y).join(',') === b.slice().sort((x, y) => x - y).join(',');
+const progress = n => { if (n % 10 === 0) console.log('@@p', n); };
 `;
 
 const ENUMERATE = `
@@ -165,55 +184,76 @@ const nums = links.map(function (a) {
 return { count: links.length, nums: nums, href: location.href, title: document.title };
 `;
 
-const HARVEST_ONE = `async (n) => {
+// One evaluate for the whole range: 85 questions used to cost 85 round-trips plus a
+// 60ms poll each; now it is one round-trip and the page never stops moving.
+const HARVEST_ALL = `async (args) => {
 ${H}
-  if (!(await jump(n))) return { n: n, error: 'jump-failed' };
-  const root = document.querySelector(P.stemRoot);
-  if (!root) return { n: n, error: 'no-question' };
-  const numEl = document.querySelector(P.questionNum);
-  const numText = ((numEl && numEl.innerText) || '').trim();
-  const m = numText.match(/^[^0-9]*([0-9]+)\\s*(.*)$/);
-  const type = m ? (m[2] || '').trim() : '';
-  const clone = root.cloneNode(true);
-  clone.querySelectorAll('label').forEach(function (e) { e.remove(); });
-  clone.querySelectorAll('script,style').forEach(function (e) { e.remove(); });
-  const stem = (clone.innerText || '').replace(/\\s+/g, ' ').trim();
-  // Option text comes from the labels in DOM order and pairs with inputs by index:
-  // wenjuan multi-select labels carry no htmlFor and their inputs all share one id.
-  const labels = Array.from(root.querySelectorAll(P.optionLabel));
-  const all = inputs();
-  const opts = labels.map(function (l, i) {
-    const t = (l.innerText || '').replace(/\\s+/g, ' ').trim();
-    const inp = l.querySelector('input') || (l.htmlFor ? document.getElementById(l.htmlFor) : null) || all[i];
-    return { i: i, text: t, kind: inp ? inp.type : '?' };
-  });
-  return { n: n, type: type, stem: stem, opts: opts };
-}`;
-
-const APPLY_BATCH = `async (args) => {
-${H}
-  const map = args.map, from = args.from, to = args.to;
-  const bad = [];
-  for (let n = from; n <= to; n++) {
-    const want = map[String(n)];
-    if (!want) { bad.push(n + ':no-answer'); continue; }
-    if (!(await jump(n))) { bad.push(n + ':jump-failed'); continue; }
-    const xs = inputs();
-    for (let i = 0; i < xs.length; i++) {
-      const should = want.indexOf(i) >= 0;
-      if (xs[i].checked !== should) { xs[i].click(); await sleep(45); }
-    }
-    const got = xs.map(function (x, i) { return x.checked ? i : -1; }).filter(function (i) { return i >= 0; }).sort(function (a, b) { return a - b; });
-    const exp = want.slice().sort(function (a, b) { return a - b; });
-    if (got.join(',') !== exp.join(',')) bad.push(n + ':' + exp + '>' + got);
+  const out = [];
+  for (let n = args.from; n <= args.to; n++) {
+    if (!(await jumpFast(n))) { out.push({ n: n, error: 'jump-failed' }); continue; }
+    const root = document.querySelector(P.stemRoot);
+    if (!root) { out.push({ n: n, error: 'no-question' }); continue; }
+    const numEl = document.querySelector(P.questionNum);
+    const numText = ((numEl && numEl.innerText) || '').trim();
+    const m = numText.match(/^[^0-9]*([0-9]+)\\s*(.*)$/);
+    const type = m ? (m[2] || '').trim() : '';
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll('label').forEach(function (e) { e.remove(); });
+    clone.querySelectorAll('script,style').forEach(function (e) { e.remove(); });
+    let stem = (clone.innerText || '').replace(/\\s+/g, ' ').trim();
+    // The badge ("12 单选题") lives inside the stem container; keep it out of the stem
+    // so the prompt does not repeat the number and the type twice.
+    const pre = numText.replace(/\\s+/g, ' ');
+    if (pre && stem.indexOf(pre) === 0) stem = stem.slice(pre.length).trim();
+    // Option text comes from the labels in DOM order and pairs with inputs by index:
+    // wenjuan multi-select labels carry no htmlFor and their inputs all share one id.
+    const labels = Array.from(root.querySelectorAll(P.optionLabel));
+    const all = inputs();
+    const opts = labels.map(function (l, i) {
+      const t = (l.innerText || '').replace(/\\s+/g, ' ').trim();
+      const inp = l.querySelector('input') || (l.htmlFor ? document.getElementById(l.htmlFor) : null) || all[i];
+      return { i: i, text: t, kind: inp ? inp.type : '?' };
+    });
+    out.push({ n: n, type: type, stem: stem, opts: opts });
+    progress(n);
   }
-  return { from: from, to: to, bad: bad };
+  return out;
 }`;
 
-const VERIFY_ONE = `async (n) => {
+const APPLY_ALL = `async (args) => {
 ${H}
-  if (!(await jump(n))) return { n: n, error: 'jump-failed' };
-  return { n: n, checked: inputs().map(function (x, i) { return x.checked ? i : -1; }).filter(function (i) { return i >= 0; }) };
+  const map = args.map, bad = [];
+  for (let n = args.from; n <= args.to; n++) {
+    const want = map[String(n)];
+    if (!want || !want.length) { bad.push(n + ':no-answer'); continue; }
+    if (!(await jumpFast(n))) { bad.push(n + ':jump-failed'); continue; }
+    const xs = inputs();
+    // Radios deselect their group by themselves; only checkboxes need clearing.
+    for (const i of want) if (xs[i] && !xs[i].checked) xs[i].click();
+    for (let i = 0; i < xs.length; i++) {
+      if (xs[i].type === 'checkbox' && xs[i].checked && want.indexOf(i) < 0) xs[i].click();
+    }
+    let got = checkedIdx();
+    if (!same(got, want)) {
+      await sleep(60);
+      for (const i of want) if (xs[i] && !xs[i].checked) xs[i].click();
+      got = checkedIdx();
+    }
+    if (!same(got, want)) bad.push(n + ':' + want + '>' + got);
+    progress(n);
+  }
+  return { from: args.from, to: args.to, bad: bad };
+}`;
+
+const VERIFY_ALL = `async (args) => {
+${H}
+  const out = [];
+  for (let n = args.from; n <= args.to; n++) {
+    if (!(await jumpFast(n))) { out.push({ n: n, error: 'jump-failed' }); continue; }
+    out.push({ n: n, checked: checkedIdx() });
+    progress(n);
+  }
+  return out;
 }`;
 
 const SUBMIT = `async () => {
@@ -302,6 +342,15 @@ function range(en, map) {
   return [lo, hi];
 }
 
+// The whole range in one evaluate is the fast path; --chunk N only exists as an escape
+// hatch for a page so slow that a single evaluate would outlive the CDP timeout.
+function chunks(lo, hi) {
+  const size = Number(flag('chunk', 0)) || (hi - lo + 1);
+  const out = [];
+  for (let a = lo; a <= hi; a += size) out.push([a, Math.min(a + size - 1, hi)]);
+  return out;
+}
+
 async function main() {
   switch (cmd) {
     case 'status':
@@ -321,11 +370,12 @@ async function main() {
         const en = await run(ENUMERATE);
         const [lo, hi] = range(en);
         const out = [];
-        for (let n = lo; n <= hi; n++) {
-          const q = await run(HARVEST_ONE, n);
-          if (q && !q.error) out.push(q);
-          else process.stderr.write(`! ${n} ${q && q.error}\n`);
-          process.stderr.write(`\r${out.length}/${hi - lo + 1}  `);
+        for (const [a, b] of chunks(lo, hi)) {
+          const part = (await run(HARVEST_ALL, { from: a, to: b })) || [];
+          for (const q of part) {
+            if (q && !q.error) out.push(q);
+            else process.stderr.write(`! ${q && q.n} ${q && q.error}\n`);
+          }
         }
         const file = flag('out', 'questions.json');
         fs.writeFileSync(file, JSON.stringify({ meta: { ...en, harvestedAt: new Date().toISOString() }, questions: out }, null, 2));
@@ -343,11 +393,10 @@ async function main() {
         const en = await run(ENUMERATE);
         const [lo, hi] = range(en, map);
         const bad = [];
-        for (let start = lo; start <= hi; start += 10) {
-          const end = Math.min(start + 9, hi);
-          const r = await run(APPLY_BATCH, { map, from: start, to: end });
+        for (const [a, b] of chunks(lo, hi)) {
+          const r = await run(APPLY_ALL, { map, from: a, to: b });
           bad.push.apply(bad, r.bad);
-          process.stderr.write(`\r${end}/${hi}  ${bad.length} bad  `);
+          process.stderr.write(`\r${b}/${hi}  ${bad.length} bad  `);
         }
         console.error('');
         console.log(JSON.stringify({ applied: hi - lo + 1 - bad.length, bad }, null, 2));
@@ -360,11 +409,13 @@ async function main() {
         const en = await run(ENUMERATE);
         const [lo, hi] = range(en, map);
         const wrong = [];
-        for (let n = lo; n <= hi; n++) {
-          const r = await run(VERIFY_ONE, n);
-          const want = (map[String(n)] || []).slice().sort((a, b) => a - b).join(',');
-          const got = (r.checked || []).join(',');
-          if (want !== got) wrong.push({ n, want, got });
+        for (const [a, b] of chunks(lo, hi)) {
+          const part = (await run(VERIFY_ALL, { from: a, to: b })) || [];
+          for (const r of part) {
+            const want = (map[String(r.n)] || []).slice().sort((x, y) => x - y).join(',');
+            const got = (r.checked || []).join(',');
+            if (want !== got) wrong.push({ n: r.n, want, got });
+          }
         }
         console.log(JSON.stringify({ checked: hi - lo + 1, wrong }, null, 2));
       });

@@ -38,8 +38,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\browser.ps1 -Action 
 
 ```bash
 node scripts/exam.mjs probe   --port 9223                  # 页面是否匹配已知 profile
-node scripts/exam.mjs harvest --port 9223 --out q.json     # 逐题跳转+等待渲染，落 q.json 和 q.txt
+node scripts/exam.mjs harvest --port 9223 --out q.json     # 整个区间一次页内执行，落 q.json 和 q.txt
 ```
+
+抓题不是每题一次往返：整个 1..N 区间在一个 `Runtime.evaluate` 里循环，等待题号用 `MutationObserver`，题号一变立刻返回下一题。85 题通常 1–2 秒。页面特别慢、怕撞 CDP 超时时用 `--chunk 20` 拆段。
 
 `q.txt` 每两行一题（`n|题型|题干` / `0=.. 1=..`），专门给人/模型读，比 JSON 省一半 token。**先 `probe`**：`numberLinks` 为 0 说明结构不匹配，改 `PROFILES`（`exam.mjs` 顶部）或 `--profile generic`。
 
@@ -66,7 +68,7 @@ node scripts/answer.mjs --questions q.json --out a.json
 node scripts/answer.mjs --questions q.json --dry-run   # 只看 prompt，不花钱
 ```
 
-`exam-config.json` 落在**当前工作目录**，不是技能目录——沙箱下子进程写技能根目录会 `EPERM`。也可用环境变量 `EXAM_API_KEY` / `DEEPSEEK_API_KEY`，或 `--config <路径>`。输出 `{"<题号>": [下标...]}`，缺答会缩小批次重试 2 轮，仍未拿到的列在 `missing`。
+`exam-config.json` 落在**当前工作目录**，不是技能目录——沙箱下子进程写技能根目录会 `EPERM`。也可用环境变量 `EXAM_API_KEY` / `DEEPSEEK_API_KEY`，或 `--config <路径>`。输出 `{"<题号>": [下标...]}`，缺答会缩小批次重试 2 轮，仍未拿到的列在 `missing`。默认 **4 路并发**请求（`--concurrency N` 可调），85 题的等待时间约为串行的 1/3。
 
 ## 4. 作答 → 校验 → 交卷
 
@@ -76,7 +78,7 @@ node scripts/exam.mjs verify --port 9223 --map answers.txt   # 必须跑，看 w
 node scripts/exam.mjs submit --port 9223
 ```
 
-`apply` 每 10 题一批（单次 evaluate 太长会撞 CDP 超时），返回 `bad` 列表。**`bad` 非空不等于失败**——常见是跳题时渲染慢导致的 `jump-failed`，`verify` 会给出真实的选中状态，对不上的题重跑一次 `apply --from N --to N`。
+`apply` 走一遍整个区间（同样是一次页内执行，不是每题一批），返回 `bad` 列表。**`bad` 非空不等于失败**——常见是跳题时渲染慢导致的 `jump-failed`，`verify` 会给出真实的选中状态，对不上的题重跑一次 `apply --from N --to N`。单选只点目标项（radio 会自己取消同组），只有复选框才做清除。
 
 `submit` 会点交卷并自动接受 `confirm()` 弹窗，返回 `ok:false` 且文本里出现「重新交卷 / 正在保存」时，说明服务端没接受，再跑一次 `submit`。
 

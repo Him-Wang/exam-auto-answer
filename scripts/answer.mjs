@@ -138,29 +138,34 @@ async function main() {
   if (!cfg.apiKey) throw new Error(`no API key. Set one first:\n  node answer.mjs --set-key <your key>\nor export EXAM_API_KEY=...`);
 
   const answers = {};
-  const pending = [...questions];
-  for (let attempt = 0; attempt < 3 && pending.length; attempt++) {
-    const batchSize = attempt === 0 ? cfg.batch : 3;
-    for (let i = 0; i < pending.length; i += batchSize) {
-      const batch = pending.slice(i, i + batchSize);
-      const messages = [
+  // Batches are independent HTTP calls: running a few at once is the difference between
+  // 85 questions taking one minute and taking four.
+  const CONC = Math.max(1, Number(flag('concurrency', process.env.EXAM_CONCURRENCY || 4)));
+  const askBatch = async (batch) => {
+    try {
+      const raw = await chat(cfg, [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: buildUser(batch) },
-      ];
-      try {
-        const raw = await chat(cfg, messages);
-        const got = parseMap(raw, batch);
-        Object.assign(answers, got);
-      } catch (e) {
-        process.stderr.write(`\nbatch ${batch[0]?.n}-${batch[batch.length - 1]?.n} failed: ${e.message}\n`);
-      }
-      process.stderr.write(`\ranswered ${Object.keys(answers).length}/${questions.length}  `);
+      ]);
+      Object.assign(answers, parseMap(raw, batch));
+    } catch (e) {
+      process.stderr.write(`\nbatch ${batch[0] && batch[0].n}-${batch[batch.length - 1] && batch[batch.length - 1].n} failed: ${e.message}\n`);
     }
-    const missing = questions.filter((q) => !answers[q.n]);
-    if (!missing.length) break;
-    pending.length = 0;
-    pending.push(...missing);
-    if (attempt < 2) process.stderr.write(`\nretrying ${missing.length} missing as smaller batches\n`);
+    process.stderr.write(`\ranswered ${Object.keys(answers).length}/${questions.length}  `);
+  };
+
+  let pending = [...questions];
+  for (let attempt = 0; attempt < 3 && pending.length; attempt++) {
+    const batchSize = attempt === 0 ? cfg.batch : 3;
+    const batches = [];
+    for (let i = 0; i < pending.length; i += batchSize) batches.push(pending.slice(i, i + batchSize));
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < batches.length) await askBatch(batches[cursor++]);
+    };
+    await Promise.all(Array.from({ length: Math.min(CONC, batches.length) }, worker));
+    pending = questions.filter((q) => !answers[q.n]);
+    if (pending.length && attempt < 2) process.stderr.write(`\nretrying ${pending.length} missing as smaller batches\n`);
   }
 
   const missing = questions.filter((q) => !answers[q.n]).map((q) => q.n);

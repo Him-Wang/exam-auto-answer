@@ -31,7 +31,7 @@
 
 | | skill 版 | 软件版 |
 |---|---|---|
-| 获取 | 本仓库源码 / Releases 里的 `exam-auto-answer-skill-v1.0.0.zip` | Releases 里的 `ExamAutoAnswer-1.0.0-portable.exe` |
+| 获取 | 本仓库源码 / Releases 里的 `exam-auto-answer-skill-v1.1.0.zip` | Releases 里的 `ExamAutoAnswer-1.1.0-portable.exe` |
 | 谁出答案 | 对话里的模型 | 你在界面里填的 API key 所指向的模型 |
 | 需要 key | 不需要 | 需要 |
 | 形态 | 目录里的 SKILL.md + 脚本 | 双击运行的单文件程序 |
@@ -94,20 +94,21 @@ node scripts/exam.mjs submit --port 9223
 
 ## 软件版（Electron，需要 API key）
 
-到 [Releases](../../releases) 下载 `ExamAutoAnswer-1.0.0-portable.exe`，双击即用，不需要装 Node、不需要命令行。
+到 [Releases](../../releases) 下载 `ExamAutoAnswer-1.1.0-portable.exe`，双击即用，不需要装 Node、不需要命令行。
 
-流程：填端口和考试地址 → `1·启动浏览器` → 登录（验证码自己输）→ `2·抓题` → `3·出答案` → `4·写入` → `5·校验` → `6·交卷`（会二次确认）。也有「一键跑完」，但**不含交卷**。
+流程：填端口和考试地址 → 点步骤 `01 启动浏览器` → 登录（验证码自己输）→ `02 抓题` → `03 出答案` → `04 写入` → `05 校验` → `06 交卷`（会二次确认）。六个步骤卡都可以直接点，也有「一键跑完」，但**不含交卷**。
 
 - 第一步先点「保存配置」把 key 写进去，再点「检查配置」确认 baseUrl / 模型 / 掩码。
 - 工作目录在 `%APPDATA%\ExamAutoAnswer\work`，点「打开工作目录」直达，里面有 `questions.json` / `answers.json` / `exam-config.json`。
 - 交卷不可撤销，所以按钮是红的，并且会弹确认框告诉你已写入多少题。
+- 速度：抓题 / 写入 / 校验都是**整个区间一次页内执行**（不是每题一次往返），85 题的卷子每步 1–3 秒；出答案默认 4 路并发请求。
 
 自己构建：
 
 ```bash
 cd app
 npm install
-npm run dist      # → dist/ExamAutoAnswer-1.0.0-portable.exe
+npm run dist      # → dist/ExamAutoAnswer-1.1.0-portable.exe
 ```
 
 `app/` 只有 `main.js` / `preload.js` / `index.html` 三个文件，壳只负责 spawn 进程和转发输出，所有逻辑仍在 `scripts/` 里，没有第二份实现。
