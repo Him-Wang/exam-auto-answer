@@ -56,6 +56,11 @@ switch ($Action) {
       '--no-first-run', '--no-default-browser-check',
       '--disable-sync',
       '--disable-features=msEdgeOnRampDefault,msImplicitSignin',
+      # Without these a window behind another one throttles its timers to ~1s, and the
+      # in-page wait for the next question turns a 25ms step into a 1s step.
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
       '--remote-allow-origins=*',
       '--new-window', $Url
     )

@@ -124,6 +124,9 @@ async function connect() {
   const session = new Session(ws);
   await session.send('Page.enable');
   await session.send('Runtime.enable');
+  // A window that is not in front throttles timers to ~1s. Focus emulation keeps the page
+  // on the fast path without touching the viewport (an override would reload an exam page).
+  try { await session.send('Emulation.setFocusEmulationEnabled', { enabled: true }); } catch { /* older builds */ }
   // Auto-accept every JS dialog: the confirm() on 交卷 would otherwise hang the page.
   session.onEvent = (m) => {
     if (m.method === 'Page.javascriptDialogOpening') {
