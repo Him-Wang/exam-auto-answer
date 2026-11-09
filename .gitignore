@@ -14,5 +14,6 @@ answer-map*.json
 # 运行时产物
 *.png
 node_modules/
+dist/
 .DS_Store
 Thumbs.db

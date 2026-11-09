@@ -1,0 +1,43 @@
+{
+  "name": "exam-auto-answer-app",
+  "productName": "ExamAutoAnswer",
+  "version": "1.0.0",
+  "description": "Desktop UI for the exam-auto-answer CDP pipeline (standalone / API-key mode)",
+  "main": "main.js",
+  "author": "Him-Wang",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.himwang.examautoanswer",
+    "productName": "ExamAutoAnswer",
+    "electronVersion": "43.3.0",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../scripts",
+        "to": "scripts"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "ExamAutoAnswer-${version}-portable.exe"
+    }
+  }
+}

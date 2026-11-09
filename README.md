@@ -6,9 +6,11 @@
 
 **在 Claude Code / DSH / Cursor 这类对话环境里用，不需要任何 API key** —— 答题的就是对话里的模型自己。只有想脱离对话无人值守跑，才需要导入一个 OpenAI 兼容的 key。
 
-## 这是什么：一个 skill，不是一个软件
+## 这是什么：一个 skill，不是软件（但仓库里另外附了一个软件版）
 
-**这是一个 skill（技能包），不是可独立运行的软件。** 没有安装包、没有窗口、没有常驻进程，也没有 `npm install`。
+**默认形态是 skill（技能包）**：一份写给 AI 读的操作手册 + 配套脚本。没有安装包、没有窗口、没有常驻进程，也不需要任何 API key —— 答题的是对话里的模型。
+
+仓库里**另外**提供一个 **Electron 软件版**（`app/` 目录，成品在 [Releases](../../releases)）：那才是一个能双击运行的独立程序，带界面，需要 API key。两者共用同一套 `scripts/`，软件版只是外壳，逻辑没有第二份。
 
 | | skill（本仓库） | 软件 |
 |---|---|---|
@@ -23,7 +25,17 @@
 - **`scripts/*.mjs` 是手，不是脑。** 它们是很普通的 Node CLI，你手动敲 `node scripts/exam.mjs harvest --port 9223` 也照样抓题；但没人告诉它该选哪个选项时，它自己什么也不会做。
 - **`answer.mjs` 让它变成"半个软件"。** 配上 key 之后可以无人值守自己跑完，但仍然是个没有界面的命令行程序——只是把"脑"外包给了模型 API。
 
-想把它变成真正的软件（双击启动、有界面、看得见进度），需要另外套一层 Electron / Tauri 外壳，那是另一个工程，不在本仓库范围内。
+想把它变成真正的软件（双击启动、有界面、看得见进度），本仓库已经套好了 Electron 外壳：见下面的「软件版」。
+
+## 两种形态对照
+
+| | skill 版 | 软件版 |
+|---|---|---|
+| 获取 | 本仓库源码 / Releases 里的 `exam-auto-answer-skill-v1.0.0.zip` | Releases 里的 `ExamAutoAnswer-1.0.0-portable.exe` |
+| 谁出答案 | 对话里的模型 | 你在界面里填的 API key 所指向的模型 |
+| 需要 key | 不需要 | 需要 |
+| 形态 | 目录里的 SKILL.md + 脚本 | 双击运行的单文件程序 |
+| 适合 | 在 DSH / Claude Code 里说一句话就开跑 | 不想装 CLI、想要可见进度和按钮 |
 
 ## 它解决的三个具体问题
 
@@ -79,6 +91,26 @@ node scripts/exam.mjs submit --port 9223
 ```
 
 `apply` 也直接吃 `{"12": [0,2]}` 形式的 JSON。
+
+## 软件版（Electron，需要 API key）
+
+到 [Releases](../../releases) 下载 `ExamAutoAnswer-1.0.0-portable.exe`，双击即用，不需要装 Node、不需要命令行。
+
+流程：填端口和考试地址 → `1·启动浏览器` → 登录（验证码自己输）→ `2·抓题` → `3·出答案` → `4·写入` → `5·校验` → `6·交卷`（会二次确认）。也有「一键跑完」，但**不含交卷**。
+
+- 第一步先点「保存配置」把 key 写进去，再点「检查配置」确认 baseUrl / 模型 / 掩码。
+- 工作目录在 `%APPDATA%\ExamAutoAnswer\work`，点「打开工作目录」直达，里面有 `questions.json` / `answers.json` / `exam-config.json`。
+- 交卷不可撤销，所以按钮是红的，并且会弹确认框告诉你已写入多少题。
+
+自己构建：
+
+```bash
+cd app
+npm install
+npm run dist      # → dist/ExamAutoAnswer-1.0.0-portable.exe
+```
+
+`app/` 只有 `main.js` / `preload.js` / `index.html` 三个文件，壳只负责 spawn 进程和转发输出，所有逻辑仍在 `scripts/` 里，没有第二份实现。
 
 ## 可选：API 模式（无人值守）
 

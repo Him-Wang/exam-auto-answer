@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>ExamAutoAnswer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --line: #242833;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #4f7cff;
+    --ok: #35c07d;
+    --bad: #ff5c6c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+  header .tag {
+    font-size: 11px; color: #9fb3ff; border: 1px solid #2b3a6b;
+    background: #16203a; padding: 1px 7px; border-radius: 999px;
+  }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  main { flex: 1; display: grid; grid-template-rows: auto auto 1fr; gap: 12px; padding: 14px 18px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  input {
+    width: 100%; background: #0d1016; border: 1px solid var(--line); color: var(--text);
+    border-radius: 7px; padding: 7px 9px; font: inherit; outline: none;
+  }
+  input:focus { border-color: #3a5bbf; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    background: #1d2230; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 13px; font: inherit; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #232a3b; border-color: #333c52; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #5f89ff; }
+  button.danger { border-color: #5a2530; color: #ff8a95; }
+  #log {
+    flex: 1; min-height: 0; overflow: auto; background: #0b0d12; border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; font: 12px/1.5 "Cascadia Mono", Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word; color: #c8cede;
+  }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #3b4257; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.busy { background: #d8a13a; }
+  .hint { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ExamAutoAnswer</h1>
+  <span class="tag">软件版 · 需要 API key</span>
+  <span class="sub">skill 版在仓库里，免 key，由对话中的模型答题</span>
+</header>
+
+<main>
+  <section class="card">
+    <div class="grid">
+      <div><label>调试端口</label><input id="port" value="9223" /></div>
+      <div><label>考试地址</label><input id="url" placeholder="https://cssc.wenjuan.com/..." /></div>
+      <div><label>API Key（写入本地 exam-config.json）</label><input id="key" type="password" placeholder="sk-..." /></div>
+      <div><label>Base URL</label><input id="baseUrl" value="https://api.deepseek.com/v1" /></div>
+      <div><label>模型</label><input id="model" value="deepseek-chat" /></div>
+      <div style="display:flex; align-items:flex-end; gap:8px;">
+        <button id="save">保存配置</button>
+        <button id="check">检查配置</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <button id="launch" class="primary">1 · 启动浏览器</button>
+      <button id="probe">探针</button>
+      <button id="harvest">2 · 抓题</button>
+      <button id="answer">3 · 出答案</button>
+      <button id="apply">4 · 写入</button>
+      <button id="verify">5 · 校验</button>
+      <button id="submit" class="danger">6 · 交卷</button>
+      <span style="flex:1"></span>
+      <button id="auto" class="primary">一键跑完（不含交卷）</button>
+      <button id="opendir">打开工作目录</button>
+    </div>
+    <div class="status" style="margin-top:10px;">
+      <span id="dot" class="dot"></span><span id="state">就绪</span>
+      <span class="hint" style="margin-left:auto">登录与验证码请在浏览器窗口里自己完成；交卷不可撤销</span>
+    </div>
+  </section>
+
+  <div id="log">等待操作…</div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const log = $('log');
+  const stateEl = $('state');
+  const dot = $('dot');
+  let busy = false;
+
+  const BTNS = ['save','check','launch','probe','harvest','answer','apply','verify','submit','auto','opendir'];
+
+  function append(t) {
+    log.textContent += t;
+    log.scrollTop = log.scrollHeight;
+  }
+  window.api.onLog(append);
+
+  function setState(text, kind) {
+    stateEl.textContent = text;
+    dot.className = 'dot' + (kind ? ' ' + kind : '');
+  }
+
+  function opts() {
+    return {
+      port: $('port').value.trim() || '9223',
+      url: $('url').value.trim(),
+      key: $('key').value,
+      baseUrl: $('baseUrl').value.trim(),
+      model: $('model').value.trim(),
+    };
+  }
+
+  function lock(on) {
+    busy = on;
+    BTNS.forEach((id) => { $(id).disabled = on; });
+  }
+
+  async function call(step, label) {
+    lock(true);
+    setState(label + '…', 'busy');
+    try {
+      const r = await window.api.run(step, opts());
+      if (r.ok) setState(label + ' 完成', 'ok');
+      else setState(label + ' 失败（退出码 ' + r.code + '）', 'bad');
+      return r;
+    } catch (e) {
+      append('\n[error] ' + e.message + '\n');
+      setState(label + ' 异常', 'bad');
+      return { ok: false };
+    } finally {
+      lock(false);
+    }
+  }
+
+  $('launch').onclick = () => call('launch', '启动浏览器');
+  $('probe').onclick = () => call('probe', '探针');
+  $('harvest').onclick = () => call('harvest', '抓题');
+  $('answer').onclick = () => call('answer', '出答案');
+  $('apply').onclick = () => call('apply', '写入答案');
+  $('verify').onclick = () => call('verify', '校验');
+  $('save').onclick = () => call('saveKey', '保存配置');
+  $('check').onclick = () => call('checkKey', '检查配置');
+
+  $('submit').onclick = async () => {
+    const n = Object.keys(JSON.parse((await window.api.readFile('answers.json')) || '{}')).length;
+    if (!confirm('确认交卷？\n已写入 ' + n + ' 题。交卷通常不可撤销、并消耗考试次数。')) return;
+    await call('submit', '交卷');
+  };
+
+  $('auto').onclick = async () => {
+    for (const [step, label] of [['harvest','抓题'], ['answer','出答案'], ['apply','写入答案'], ['verify','校验']]) {
+      const r = await call(step, label);
+      if (!r.ok) { append('\n[stopped] ' + label + ' 失败，流程中止。\n'); return; }
+    }
+    setState('一键流程完成，请检查校验结果后再交卷', 'ok');
+  };
+
+  $('opendir').onclick = () => window.api.openWorkDir();
+</script>
+</body>
+</html>
